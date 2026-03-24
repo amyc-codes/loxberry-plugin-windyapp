@@ -1,0 +1,13 @@
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          windyapp
+# Required-Start:
+# Required-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Windy.app Wind Forecast
+# Description:       LoxBerry plugin for multi-model wind forecasts from windy.app
+### END INIT INFO
+
+# This plugin uses LoxBerry cron scheduling.
+# The daemon script is a placeholder required by the plugin framework.

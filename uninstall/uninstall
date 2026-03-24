@@ -1,0 +1,13 @@
+#!/bin/bash
+# Uninstall script for Windy.app Wind Forecast plugin
+
+# Remove cron jobs
+rm -f "$LBHOMEDIR/system/cron/cron.01min/windyapp" 2>/dev/null
+rm -f "$LBHOMEDIR/system/cron/cron.03min/windyapp" 2>/dev/null
+rm -f "$LBHOMEDIR/system/cron/cron.05min/windyapp" 2>/dev/null
+rm -f "$LBHOMEDIR/system/cron/cron.10min/windyapp" 2>/dev/null
+rm -f "$LBHOMEDIR/system/cron/cron.15min/windyapp" 2>/dev/null
+rm -f "$LBHOMEDIR/system/cron/cron.30min/windyapp" 2>/dev/null
+rm -f "$LBHOMEDIR/system/cron/cron.60min/windyapp" 2>/dev/null
+
+echo "<OK> Windy.app plugin uninstalled."
