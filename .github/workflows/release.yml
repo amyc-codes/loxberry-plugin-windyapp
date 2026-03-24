@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Validate version matches plugin.cfg
+        run: |
+          PLUGIN_VERSION=$(python3 -c "
+          import configparser
+          cfg = configparser.ConfigParser()
+          cfg.read('plugin.cfg')
+          print(cfg.get('PLUGIN', 'VERSION'))
+          ")
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          if [ "$PLUGIN_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: plugin.cfg version ($PLUGIN_VERSION) != tag version ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version match: $PLUGIN_VERSION"
+
+      - name: Build release ZIP
+        run: |
+          zip -r "windyapp-v${{ steps.version.outputs.version }}.zip" \
+            plugin.cfg release.cfg \
+            bin/ config/ daemon/ icons/ \
+            webfrontend/ uninstall/ \
+            postinstall.sh preupgrade.sh \
+            README.md LICENSE \
+            -x "*.git*" ".github/*"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "windyapp-v${{ steps.version.outputs.version }}.zip"
+          generate_release_notes: true
+          body: |
+            ## Windy.app Wind Forecast v${{ steps.version.outputs.version }}
+
+            ### Installation
+            Install via LoxBerry Plugin Management:
+            ```
+            https://github.com/amyc-codes/loxberry-plugin-windyapp/releases/download/v${{ steps.version.outputs.version }}/windyapp-v${{ steps.version.outputs.version }}.zip
+            ```

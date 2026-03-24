@@ -1,0 +1,170 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pyflakes
+
+      - name: Python lint
+        run: pyflakes bin/fetch.py
+
+      - name: PHP syntax check
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq php-cli > /dev/null
+          php -l webfrontend/htmlauth/index.php
+
+      - name: Shell lint
+        run: |
+          bash -n bin/cronjob.sh
+          bash -n postinstall.sh
+          bash -n preupgrade.sh
+          bash -n daemon/daemon
+          bash -n uninstall/uninstall
+
+      - name: Validate plugin.cfg
+        run: |
+          python3 -c "
+          import configparser
+          cfg = configparser.ConfigParser()
+          cfg.read('plugin.cfg')
+          required = {
+              'AUTHOR': ['NAME', 'EMAIL'],
+              'PLUGIN': ['VERSION', 'NAME', 'FOLDER', 'TITLE'],
+              'SYSTEM': ['INTERFACE'],
+          }
+          errors = []
+          for section, keys in required.items():
+              if not cfg.has_section(section):
+                  errors.append(f'Missing section [{section}]')
+                  continue
+              for key in keys:
+                  if not cfg.get(section, key, fallback=''):
+                      errors.append(f'Missing {section}.{key}')
+          if errors:
+              for e in errors:
+                  print(f'ERROR: {e}')
+              exit(1)
+          print('plugin.cfg OK')
+          v = cfg.get('PLUGIN', 'VERSION')
+          print(f'  Version: {v}')
+          print(f'  Name: {cfg.get(\"PLUGIN\", \"NAME\")}')
+          print(f'  Interface: {cfg.get(\"SYSTEM\", \"INTERFACE\")}')
+          "
+
+  test:
+    name: Test Fetch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Dry-run fetch (import check)
+        run: |
+          python3 -c "
+          import sys, os
+          os.environ['LBHOMEDIR'] = '/tmp/loxberry'
+          os.makedirs('/tmp/loxberry/config/plugins/windyapp', exist_ok=True)
+          os.makedirs('/tmp/loxberry/data/plugins/windyapp', exist_ok=True)
+          os.makedirs('/tmp/loxberry/log/plugins/windyapp', exist_ok=True)
+          import shutil
+          shutil.copy('config/windyapp.cfg', '/tmp/loxberry/config/plugins/windyapp/windyapp.cfg')
+
+          # Create a dummy general.cfg
+          os.makedirs('/tmp/loxberry/config/system', exist_ok=True)
+          with open('/tmp/loxberry/config/system/general.cfg', 'w') as f:
+              f.write('[MINISERVER1]\nIPADDRESS=127.0.0.1\nNAME=TestMS\n')
+
+          # Test the fetch module can be imported
+          sys.path.insert(0, 'bin')
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('fetch', 'bin/fetch.py')
+          mod = importlib.util.module_from_spec(spec)
+
+          # Test config reading
+          sys.modules['fetch'] = mod
+          exec(open('bin/fetch.py').read().split('def main')[0])
+          cfg = read_config()
+          assert cfg['lat'] == 47.85397
+          assert 'ECMWF' in cfg['models']
+          assert cfg['udp_port'] == 7001
+          print('Config read OK')
+          print(f'  Models: {cfg[\"models\"]}')
+          print(f'  Location: {cfg[\"lat\"]}, {cfg[\"lon\"]}')
+          "
+
+      - name: Test windy.app API connectivity
+        run: |
+          python3 -c "
+          import requests, json
+          url = 'https://windy.app/widget3/coord/ECMWF/47.85397/13.0266/1'
+          resp = requests.get(url, timeout=30)
+          assert resp.status_code == 200, f'API returned {resp.status_code}'
+          data = resp.json()
+          assert 'spotInfo' in data, 'Missing spotInfo'
+          forecast = json.loads(data['spotInfo']['forecastJson'])
+          assert len(forecast) > 0, 'Empty forecast'
+          print(f'API OK: {len(forecast)} forecast entries')
+          ws = forecast[0].get('windSpeed', 'N/A')
+          wd = forecast[0].get('windDirection', 'N/A')
+          print(f'  First entry: {ws} m/s, {wd}°')
+          "
+
+  package:
+    name: Package Plugin
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(python3 -c "
+          import configparser
+          cfg = configparser.ConfigParser()
+          cfg.read('plugin.cfg')
+          print(cfg.get('PLUGIN', 'VERSION'))
+          ")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Plugin version: $VERSION"
+
+      - name: Build ZIP
+        run: |
+          mkdir -p dist
+          zip -r "dist/windyapp-v${{ steps.version.outputs.version }}.zip" \
+            plugin.cfg release.cfg \
+            bin/ config/ daemon/ icons/ \
+            webfrontend/ uninstall/ \
+            postinstall.sh preupgrade.sh \
+            README.md LICENSE \
+            -x "*.git*" "dist/*" ".github/*"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windyapp-plugin
+          path: dist/*.zip
