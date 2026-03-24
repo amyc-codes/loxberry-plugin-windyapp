@@ -12,8 +12,6 @@ import socket
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
-
 try:
     import requests
 except ImportError:
